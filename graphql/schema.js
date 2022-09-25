@@ -6,14 +6,15 @@ import {
   GraphQLNonNull,
   GraphQLList,
   GraphQLSchema,
+  GraphQLBoolean,
 } from "graphql";
 // import graphql types
 import {
-  CustomResponseType,
   UserType,
   LoginType,
   LogoutType,
   PostType,
+  LikeType,
   CommentType,
 } from "./types.js";
 import User from "../db/models/user.js";
@@ -32,7 +33,7 @@ const RootQuery = new GraphQLObjectType({
         throw new Error("not authorized");
       },
     },
-    postComments: {
+    comments: {
       type: new GraphQLList(CommentType),
       args: {
         postId: { type: GraphQLString },
@@ -40,12 +41,16 @@ const RootQuery = new GraphQLObjectType({
       async resolve(_, args, context) {
         const { isAuth } = context;
         const { postId } = args;
-        if (!isAuth) throw new Error("not authorized");
-        const { comments } = await Post.findOne(
-          { _id: postId },
-          { comments: true }
-        );
-        return comments;
+        try {
+          if (!isAuth) throw new Error("not authorized");
+          const { comments } = await Post.findOne(
+            { _id: postId },
+            { comments: true }
+          );
+          return comments;
+        } catch (error) {
+          return error;
+        }
       },
     },
   },
@@ -61,21 +66,16 @@ const mutation = new GraphQLObjectType({
         username: { type: new GraphQLNonNull(GraphQLString) },
         email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
-        confirmPassword: { type: new GraphQLNonNull(GraphQLString) },
       },
       async resolve(_, args) {
-        const { username, email, password, confirmPassword } = args;
+        const { username, email, password } = args;
         try {
           const userExists = await User.findOne({ username });
-          if (userExists) {
-            throw new Error("User already exists.");
-          }
+          if (userExists) throw new Error("User already exists.");
           const newUser = new User({
             username,
             password,
-            confirmPassword,
             email,
-            createdAt,
           });
           return newUser.save();
         } catch (error) {
@@ -87,32 +87,30 @@ const mutation = new GraphQLObjectType({
     login: {
       type: LoginType,
       args: {
-        username: { type: new GraphQLNonNull(GraphQLString) },
+        email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
       },
       async resolve(_, args, context) {
         const { res } = context;
-        const { username, password } = args;
+        const { email, password } = args;
         try {
-          const userExists = await User.findOne({ username });
-          if (!userExists) throw new Error("Invalid Credentials");
+          const existingUser = await User.findOne({ email });
+          if (!existingUser) throw new Error("Invalid Credentials");
           const isPasswordMatching = await bcrypt.compare(
             password,
-            userExists.password
+            existingUser.password
           );
           if (!isPasswordMatching) throw new Error("Invalid Credentials");
-          let token = await userExists.generateAuthToken();
+          let token = await existingUser.generateAuthToken();
           res.setHeader(
             "Set-Cookie",
             cookie.serialize("jwtToken", token, {
-              expires: new Date(Date.now() + 360000),
+              expires: new Date(Date.now() + 36000000),
               httpOnly: true,
               path: "/",
             })
           );
-          return {
-            userId: userExists.id,
-          };
+          return existingUser;
         } catch (error) {}
       },
     },
@@ -158,29 +156,55 @@ const mutation = new GraphQLObjectType({
       resolve(_, args, context) {
         const { isAuth, userId } = context;
         const { username, body } = args;
-        if (!isAuth) throw new Error("Not Authorized");
-        const newPost = new Post({ username, body, user: userId });
-        return newPost.save();
+        try {
+          if (!isAuth) throw new Error("Not Authorized");
+          const newPost = new Post({ username, body, user: userId });
+          return newPost.save();
+        } catch (error) {
+          return error;
+        }
       },
     },
-    likeOnPost: {
-      type: CustomResponseType,
+    likePost: {
+      type: new GraphQLList(LikeType),
       args: {
         postId: { type: new GraphQLNonNull(GraphQLString) },
+        username: { type: new GraphQLNonNull(GraphQLString) },
       },
       async resolve(_, args, context) {
-        const { isAuth } = context;
-        const { postId } = args;
-        if (!isAuth) throw new Error("Not Authorized");
-        const { acknowledged, modifiedCount, matchedCount } =
-          await Post.updateOne({ _id: postId }, { $inc: { likes: 1 } });
-        if (acknowledged && modifiedCount == 1 && matchedCount == 1)
-          return { success: true, message: "Liked on post" };
-        return { success: false, message: "Unable to like post" };
+        const { isAuth, userId } = context;
+        const { postId, username } = args;
+        try {
+          if (!isAuth) throw new Error("Not Authorized");
+          const { acknowledged, modifiedCount, matchedCount } =
+            await Post.updateOne(
+              { _id: postId },
+              {
+                $push: {
+                  likes: {
+                    userId,
+                    username,
+                    isLiked: true,
+                  },
+                },
+              }
+            );
+          if (acknowledged && modifiedCount == 1 && matchedCount == 1) {
+            const queryResult = await Post.findOne(
+              { _id: postId },
+              { likes: true, _id: false }
+            );
+            return queryResult.likes;
+          }
+          throw new Error("Unable to like post");
+        } catch (error) {
+          console.log(error);
+          return error;
+        }
       },
     },
     commentOnPost: {
-      type: CustomResponseType,
+      type: new GraphQLList(CommentType),
       args: {
         postId: { type: new GraphQLNonNull(GraphQLString) },
         username: { type: new GraphQLNonNull(GraphQLString) },
@@ -189,19 +213,29 @@ const mutation = new GraphQLObjectType({
       async resolve(_, args, context) {
         const { isAuth, userId } = context;
         const { postId, username, body } = args;
-        if (!isAuth) throw new Error("Not Authorized");
-        const { acknowledged, modifiedCount, matchedCount } =
-          await Post.updateOne(
-            { _id: postId },
-            { $push: { comments: { username, body } } }
-          );
-        if (acknowledged && modifiedCount == 1 && matchedCount == 1)
-          return { success: true, message: "Commented on post" };
-        return { success: false, message: "Unable to comment on post" };
+        try {
+          if (!isAuth) throw new Error("Not Authorized");
+          const { acknowledged, modifiedCount, matchedCount } =
+            await Post.updateOne(
+              { _id: postId },
+              { $push: { comments: { userId, username, body } } }
+            );
+
+          if (acknowledged && modifiedCount == 1 && matchedCount == 1) {
+            const queryResult = await Post.findOne(
+              { _id: postId },
+              { comments: true, _id: false }
+            );
+            return queryResult.comments;
+          }
+          throw new Error("Unable to comment on post");
+        } catch (error) {
+          return error;
+        }
       },
     },
     deletePost: {
-      type: CustomResponseType,
+      type: new GraphQLList(PostType),
       args: {
         postId: { type: new GraphQLNonNull(GraphQLString) },
       },
@@ -209,7 +243,7 @@ const mutation = new GraphQLObjectType({
         const { postId } = args;
         const { isAuth, userId } = context;
         try {
-          if (!isAuth) throw new Error("not authorized");
+          if (!isAuth) throw new Error("Not Authorized");
           const post = await Post.findOne({ _id: postId });
           if (post.user != userId)
             throw new Error("post can be only deleted by its creator");
@@ -217,8 +251,11 @@ const mutation = new GraphQLObjectType({
             _id: postId,
           });
           if (acknowledged && deletedCount == 1)
-            return { success: true, message: "Post deleted successfully" };
-          return { success: false, message: "Unable to delete post" };
+            return await Post.findOne(
+              { _id: postId },
+              { likes: true, _id: false }
+            );
+          throw new Error("Unable to delete post");
         } catch (error) {
           console.error(error);
           return error;
