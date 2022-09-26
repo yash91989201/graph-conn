@@ -6,16 +6,14 @@ import {
   GraphQLNonNull,
   GraphQLList,
   GraphQLSchema,
-  GraphQLBoolean,
 } from "graphql";
 // import graphql types
 import {
   UserType,
-  LoginType,
-  LogoutType,
-  PostType,
-  LikeType,
   CommentType,
+  LikeType,
+  PostType,
+  CustomResopnseType,
 } from "./types.js";
 import User from "../db/models/user.js";
 import Post from "../db/models/post.js";
@@ -31,6 +29,26 @@ const RootQuery = new GraphQLObjectType({
         const { isAuth } = context;
         if (isAuth) return Post.find();
         throw new Error("not authorized");
+      },
+    },
+    likes: {
+      type: new GraphQLList(LikeType),
+      args: {
+        postId: { type: GraphQLString },
+      },
+      async resolve(_, args, context) {
+        const { isAuth } = context;
+        const { postId } = args;
+        try {
+          if (!isAuth) throw new Error("not authorized");
+          const { comments } = await Post.findOne(
+            { _id: postId },
+            { likes: true }
+          );
+          return comments;
+        } catch (error) {
+          return error;
+        }
       },
     },
     comments: {
@@ -61,7 +79,7 @@ const mutation = new GraphQLObjectType({
   fields: {
     // user mutations
     signup: {
-      type: UserType,
+      type: CustomResopnseType,
       args: {
         username: { type: new GraphQLNonNull(GraphQLString) },
         email: { type: new GraphQLNonNull(GraphQLString) },
@@ -77,7 +95,11 @@ const mutation = new GraphQLObjectType({
             password,
             email,
           });
-          return newUser.save();
+          newUser.save();
+          return {
+            success: true,
+            message: "User signup successful",
+          };
         } catch (error) {
           console.error(error);
           return error;
@@ -85,7 +107,7 @@ const mutation = new GraphQLObjectType({
       },
     },
     login: {
-      type: LoginType,
+      type: CustomResopnseType,
       args: {
         email: { type: new GraphQLNonNull(GraphQLString) },
         password: { type: new GraphQLNonNull(GraphQLString) },
@@ -110,18 +132,17 @@ const mutation = new GraphQLObjectType({
               path: "/",
             })
           );
-          return existingUser;
+          return {
+            success: true,
+            message: "User login successful",
+          };
         } catch (error) {}
       },
     },
     logout: {
-      type: LogoutType,
-      args: {
-        userId: { type: new GraphQLNonNull(GraphQLString) },
-      },
-      async resolve(_, args, context) {
-        const { res, isAuth } = context;
-        const { userId } = args;
+      type: CustomResopnseType,
+      async resolve(_, __, context) {
+        const { res, isAuth, userId } = context;
         if (!isAuth) throw new Error("not authorized");
         const queryRes = await User.updateOne(
           { _id: userId },

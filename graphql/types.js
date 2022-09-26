@@ -5,39 +5,20 @@ import {
   GraphQLString,
 } from "graphql";
 
+const CustomResopnseType = new GraphQLObjectType({
+  name: "CustomResponse",
+  fields: {
+    success: { type: GraphQLBoolean },
+    message: { type: GraphQLString },
+  },
+});
+
 const UserType = new GraphQLObjectType({
   name: "Client",
   fields: {
     _id: { type: GraphQLString },
     username: { type: GraphQLString },
     email: { type: GraphQLString },
-  },
-});
-
-const LoginType = new GraphQLObjectType({
-  name: "Login",
-  fields: {
-    _id: { type: GraphQLString },
-    username: { type: GraphQLString },
-    email: { type: GraphQLString },
-  },
-});
-
-const LogoutType = new GraphQLObjectType({
-  name: "Logout",
-  fields: {
-    success: { type: GraphQLString },
-    message: { type: GraphQLString },
-  },
-});
-
-const CommentType = new GraphQLObjectType({
-  name: "Comment",
-  fields: {
-    _id: { type: GraphQLID },
-    userId: { type: GraphQLID },
-    username: { type: GraphQLString },
-    body: { type: GraphQLString },
   },
 });
 
@@ -48,6 +29,16 @@ const LikeType = new GraphQLObjectType({
     userId: { type: GraphQLID },
     username: { type: GraphQLString },
     isLiked: { type: GraphQLBoolean },
+  },
+});
+
+const CommentType = new GraphQLObjectType({
+  name: "Comment",
+  fields: {
+    _id: { type: GraphQLID },
+    userId: { type: GraphQLID },
+    username: { type: GraphQLString },
+    body: { type: GraphQLString },
   },
 });
 
@@ -69,4 +60,4 @@ const PostType = new GraphQLObjectType({
   },
 });
 
-export { UserType, LoginType, LogoutType, CommentType, LikeType, PostType };
+export { UserType, CommentType, LikeType, PostType, CustomResopnseType };
